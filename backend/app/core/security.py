@@ -1,31 +1,66 @@
 from functools import wraps
-from fastapi import HTTPException, Request
 
-# 1. The Rules Engine
+from fastapi import HTTPException, Request
+from sqlalchemy.orm import Session
+
+from app.db.models import ScopeTarget
+from app.db.session import SessionLocal
+
+
 class ScopeEngine:
-    def __init__(self):
-        # We start with a simple set of safe IPs
-        self.allowed_ips = {"127.0.0.1", "localhost", "google.com", "scanme.nmap.org"}
+    """
+    Scope engine backed by the PostgreSQL database.
+
+    Instead of relying on a hardcoded set of allowed targets, this engine
+    queries the ScopeTarget table to determine whether a given target
+    (IP or domain) is authorized.
+    """
+
+    def _is_target_in_db(self, target: str) -> bool:
+        db: Session = SessionLocal()
+        try:
+            exists = db.query(ScopeTarget).filter(ScopeTarget.target == target).first()
+            return exists is not None
+        finally:
+            db.close()
 
     def is_ip_allowed(self, ip: str) -> bool:
-        return ip in self.allowed_ips
+        """
+        Backwards-compatible API for existing decorators.
+        Internally this simply checks whether the given target exists
+        in the ScopeTarget table.
+        """
+        return self._is_target_in_db(ip)
+
 
 # Create the global engine instance
 scope_engine = ScopeEngine()
 
-# 2. The Kill Switch (Decorator)
+
 def require_scope(func):
+    """
+    Kill Switch decorator.
+
+    Ensures that every scan request first validates the requested target
+    against the ScopeTarget table. If the target is not present, the
+    request is blocked with an HTTP 403.
+    """
+
     @wraps(func)
     async def wrapper(request: Request, *args, **kwargs):
-        # Grab target from the URL (e.g. ?target=127.0.0.1)
+        # Grab target from the URL (e.g. ?target=127.0.0.1 or ?target=example.com)
         target = request.query_params.get("target")
-        
+
         if not target:
-             raise HTTPException(status_code=400, detail="Target parameter required")
+            raise HTTPException(status_code=400, detail="Target parameter required")
 
         if not scope_engine.is_ip_allowed(target):
             # BLOCK THE REQUEST
-            raise HTTPException(status_code=403, detail=f"Target {target} is NOT authorized.")
-            
+            raise HTTPException(
+                status_code=403,
+                detail=f"Target {target} is NOT authorized.",
+            )
+
         return await func(request, *args, **kwargs)
+
     return wrapper

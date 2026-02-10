@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, Query
 
+from app.api.endpoints.scope import router as scope_router
 from app.core.security import require_scope
 from app.services.dns_tool import get_dns_records
 from app.services.whois_tool import get_whois_info
 
 
 app = FastAPI(title="ReconGuard Test", version="1.0")
+app.include_router(scope_router)
 
 
 @app.get("/")

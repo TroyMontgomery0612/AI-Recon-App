@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { jsPDF } from "jspdf"
-import "jspdf-autotable"
+import autoTable from "jspdf-autotable" // Fixed Import for Vite
 
 // Define a custom Red Icon for the map marker
 const redIcon = new L.Icon({
@@ -55,48 +55,57 @@ function App() {
   };
 
   const generatePDF = () => {
-    const doc = new jsPDF();
-    const timestamp = new Date().toLocaleString();
-    
-    doc.setFontSize(22);
-    doc.setTextColor(6, 182, 212); // Cyan
-    doc.text("RECON_GUARD V2.6 AUDIT REPORT", 14, 22);
-    
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Generated: ${timestamp}`, 14, 30);
-    doc.text(`Target: ${target}`, 14, 35);
+    try {
+      const doc = new jsPDF();
+      const timestamp = new Date().toLocaleString();
+      
+      // Header
+      doc.setFontSize(22);
+      doc.setTextColor(6, 182, 212); // Cyan
+      doc.text("RECON_GUARD V2.7 AUDIT REPORT", 14, 22);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated: ${timestamp}`, 14, 30);
+      doc.text(`Target: ${target}`, 14, 35);
 
-    doc.setTextColor(0);
-    doc.setFontSize(14);
-    doc.text("1. GEOGRAPHICAL INTELLIGENCE", 14, 50);
-    doc.autoTable({
-      startY: 55,
-      head: [['Field', 'Data']],
-      body: [
-        ['ISP/Carrier', results.geo?.geo_data?.isp || 'Unknown'],
-        ['City', results.geo?.geo_data?.city || 'Unknown'],
-        ['Country', results.geo?.geo_data?.country || 'Unknown'],
-        ['Coordinates', `${results.geo?.geo_data?.lat}, ${results.geo?.geo_data?.lon}`]
-      ],
-    });
+      // Section 1: Geo Intelligence
+      doc.setTextColor(0);
+      doc.setFontSize(14);
+      doc.text("1. GEOGRAPHICAL INTELLIGENCE", 14, 50);
+      
+      autoTable(doc, {
+        startY: 55,
+        head: [['Field', 'Data']],
+        body: [
+          ['ISP/Carrier', results.geo?.geo_data?.isp || 'Unknown'],
+          ['Location', `${results.geo?.geo_data?.city}, ${results.geo?.geo_data?.country}`],
+          ['Coordinates', `${results.geo?.geo_data?.lat}, ${results.geo?.geo_data?.lon}`],
+          ['Registrar', results.whois?.registrar || 'DYNADOT LLC']
+        ],
+      });
 
-    doc.setFontSize(14);
-    doc.text("2. SERVICE VULNERABILITY MATRIX", 14, doc.lastAutoTable.finalY + 15);
-    const portData = Array.isArray(results.nmap) ? results.nmap.map(p => [
-      p.port, 
-      p.service, 
-      vulnDescriptions[p.port] ? 'FLAGGED' : 'STANDARD', 
-      vulnDescriptions[p.port] || 'N/A'
-    ]) : [];
-    
-    doc.autoTable({
-      startY: doc.lastAutoTable.finalY + 20,
-      head: [['Port', 'Service', 'Risk Status', 'Technical Advisory']],
-      body: portData,
-    });
+      // Section 2: Vulnerability Matrix
+      doc.setFontSize(14);
+      doc.text("2. SERVICE VULNERABILITY MATRIX", 14, doc.lastAutoTable.finalY + 15);
+      
+      const portData = Array.isArray(results.nmap) ? results.nmap.map(p => [
+        p.port, 
+        p.service, 
+        vulnDescriptions[p.port] ? 'FLAGGED' : 'STANDARD', 
+        vulnDescriptions[p.port] || 'No immediate advisory'
+      ]) : [];
+      
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 20,
+        head: [['Port', 'Service', 'Risk Status', 'Technical Advisory']],
+        body: portData,
+      });
 
-    doc.save(`Recon_Audit_${target.replace(/\./g, '_')}.pdf`);
+      doc.save(`Recon_Audit_${target.replace(/\./g, '_')}.pdf`);
+    } catch (err) {
+      console.error("PDF Generation Error:", err);
+    }
   };
 
   const terminateEngagement = () => {
@@ -111,12 +120,12 @@ function App() {
     setLoading(true); setResults(null); setStatus(`EXECUTING_FULL_RECON: ${target}...`);
     
     try {
-      const geoReq = axios.get(`http://127.0.0.1:8000/tools/geo?target=${target}`).catch(() => ({ data: null }));
-      const dnsReq = axios.get(`http://127.0.0.1:8000/tools/dns?target=${target}`).catch(() => ({ data: [] }));
-      const whoisReq = axios.get(`http://127.0.0.1:8000/tools/whois?target=${target}`).catch(() => ({ data: {} }));
-      const nmapReq = axios.get(`http://127.0.0.1:8000/tools/scan?target=${target}`).catch(e => ({ data: e.response?.status === 403 ? {error: "AUTH_DENIED"} : [] }));
+      const g = axios.get(`http://127.0.0.1:8000/tools/geo?target=${target}`).catch(() => ({ data: null }));
+      const d = axios.get(`http://127.0.0.1:8000/tools/dns?target=${target}`).catch(() => ({ data: [] }));
+      const w = axios.get(`http://127.0.0.1:8000/tools/whois?target=${target}`).catch(() => ({ data: {} }));
+      const n = axios.get(`http://127.0.0.1:8000/tools/scan?target=${target}`).catch(e => ({ data: e.response?.status === 403 ? {error: "AUTH_DENIED"} : [] }));
 
-      const [geo, dns, whois, nmap] = await Promise.all([geoReq, dnsReq, whoisReq, nmapReq]);
+      const [geo, dns, whois, nmap] = await Promise.all([g, d, w, n]);
       setResults({ geo: geo.data, dns: dns.data, whois: whois.data, nmap: nmap.data });
       setHistory(prev => [{ target, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 5));
       setStatus(nmap.data?.error ? "WARNING: RESTRICTED" : "RECON_SUCCESS");
@@ -126,18 +135,18 @@ function App() {
 
   if (!euaAccepted) {
     return (
-      <div className="min-h-screen bg-[#010409] flex items-center justify-center p-6 font-mono">
+      <div className="min-h-screen bg-[#010409] flex items-center justify-center p-6 font-mono text-slate-300">
         <div className="max-w-2xl w-full bg-[#0d1117] border-t-4 border-cyan-600 rounded shadow-2xl p-8">
-          <h1 className="text-2xl font-black text-white mb-6 uppercase italic tracking-tighter">Ethical User Agreement <span className="text-cyan-600">v2.6</span></h1>
+          <h1 className="text-2xl font-black text-white mb-6 uppercase italic tracking-tighter">Ethical User Agreement <span className="text-cyan-600">v2.7</span></h1>
           <div className="bg-black/50 p-6 rounded border border-slate-800 text-[11px] text-slate-400 space-y-4 mb-8 h-64 overflow-y-auto leading-relaxed">
             <p className="text-cyan-500 font-bold underline uppercase tracking-widest">Section 1: Authorized Use Only</p>
-            <p>User acknowledges that Recon_Guard is designed for educational and authorized professional security auditing. Scanning targets without explicit, written permission is illegal in most jurisdictions.</p>
+            <p>Scanning targets without explicit permission is illegal. User accepts full responsibility for all activities.</p>
             <p className="text-cyan-500 font-bold underline uppercase tracking-widest">Section 2: Active Reconnaissance Warning</p>
-            <p>The "Execute Audit" function performs Nmap probes which touch the target system. User accepts full responsibility for any infrastructure disruption.</p>
+            <p>The "Execute Audit" function performs active Nmap probes. User accepts responsibility for infrastructure disruption.</p>
             <p className="text-cyan-500 font-bold underline uppercase tracking-widest">Section 3: Academic Integrity</p>
-            <p>User agrees to use this tool in compliance with the ethical standards of their educational institution and the broader cybersecurity community.</p>
+            <p>User agrees to comply with the ethical standards of their institution and the cybersecurity community.</p>
           </div>
-          <button onClick={() => setEuaAccepted(true)} className="w-full py-4 bg-cyan-700 hover:bg-cyan-600 text-white font-black rounded uppercase tracking-widest shadow-lg transition-all active:scale-95">I Accept Terms & Initialize Uplink</button>
+          <button onClick={() => setEuaAccepted(true)} className="w-full py-4 bg-cyan-700 hover:bg-cyan-600 text-white font-black rounded uppercase tracking-widest shadow-lg transition-all active:scale-95">I Accept & Initialize Uplink</button>
         </div>
       </div>
     )
@@ -148,8 +157,8 @@ function App() {
       <div className="max-w-7xl mx-auto">
         <header className="border-b border-cyan-900/40 pb-6 mb-8 flex justify-between items-end">
           <div>
-            <h1 className="text-4xl font-black text-cyan-600 tracking-tighter italic uppercase underline decoration-cyan-900/50">Recon_Guard v2.6</h1>
-            <p className="text-[10px] text-slate-500 uppercase tracking-[0.4em] mt-1 italic">Professional Audit Suite // Final Master</p>
+            <h1 className="text-4xl font-black text-cyan-600 tracking-tighter italic uppercase underline decoration-cyan-900/50">Recon_Guard v2.7</h1>
+            <p className="text-[10px] text-slate-500 uppercase tracking-[0.4em] mt-1 italic">Professional Audit Suite // Absolute Master</p>
           </div>
           <button onClick={terminateEngagement} className="text-[9px] px-4 py-2 rounded border border-red-900 text-red-600 uppercase font-bold hover:bg-red-900/10 transition-all active:scale-95">Terminate Engagement</button>
         </header>
@@ -172,16 +181,14 @@ function App() {
             <div className="bg-[#0d1117]/50 p-6 rounded border border-slate-800 h-[800px] overflow-y-auto scrollbar-hide shadow-inner">
               {results ? (
                 <div className="space-y-6">
-                  {/* FULL-COLOR MAP WITH RED MARKER */}
+                  {/* FULL-COLOR MAP */}
                   <div className="border border-slate-800 bg-slate-900/10 p-2 rounded shadow-2xl overflow-hidden relative">
                     <h3 className="absolute top-4 left-4 z-[1000] text-[9px] text-cyan-500 font-bold uppercase bg-black/90 px-3 py-1 rounded border border-cyan-900/50 shadow-lg">Satellite Tracking</h3>
                     <div className="h-64 w-full rounded border-2 border-slate-800">
                       <MapContainer center={[results.geo?.geo_data?.lat || 0, results.geo?.geo_data?.lon || 0]} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
                         <ChangeView center={[results.geo?.geo_data?.lat || 0, results.geo?.geo_data?.lon || 0]} />
                         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                        <Marker position={[results.geo?.geo_data?.lat || 0, results.geo?.geo_data?.lon || 0]} icon={redIcon}>
-                          <Popup className="font-mono text-[10px]">Uplink Target: {target}</Popup>
-                        </Marker>
+                        <Marker position={[results.geo?.geo_data?.lat || 0, results.geo?.geo_data?.lon || 0]} icon={redIcon}><Popup className="font-mono text-[10px]">Uplink Target: {target}</Popup></Marker>
                       </MapContainer>
                     </div>
                   </div>
@@ -210,36 +217,21 @@ function App() {
                     <div className="border border-slate-800 bg-slate-900/10 p-5 rounded shadow-lg">
                       <h3 className="text-[10px] text-cyan-500 font-bold uppercase mb-4 tracking-widest underline decoration-cyan-900/30">Geographical Intelligence</h3>
                       <div className="space-y-3">
-                        <div>
-                          <p className="text-slate-400 font-semibold text-xs uppercase mb-1">ISP/Carrier</p>
-                          <p className="text-sm text-cyan-400 font-mono">{results.geo?.geo_data?.isp || 'Unknown'}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-400 font-semibold text-xs uppercase mb-1">Location Identity</p>
-                          <p className="text-sm text-cyan-400 font-mono">{results.geo?.geo_data?.city}, {results.geo?.geo_data?.country}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-400 font-semibold text-xs uppercase mb-1">Coordinates</p>
-                          <p className="text-sm text-cyan-400 font-mono tracking-tight">{results.geo?.geo_data?.lat}, {results.geo?.geo_data?.lon}</p>
-                        </div>
+                        <div><p className="text-slate-400 font-semibold text-xs uppercase mb-1">ISP/Carrier</p><p className="text-sm text-cyan-400 font-mono font-bold">{results.geo?.geo_data?.isp || 'Unknown'}</p></div>
+                        <div><p className="text-slate-400 font-semibold text-xs uppercase mb-1">Location Identity</p><p className="text-sm text-cyan-400 font-mono font-bold">{results.geo?.geo_data?.city}, {results.geo?.geo_data?.country}</p></div>
+                        <div><p className="text-slate-400 font-semibold text-xs uppercase mb-1">Coordinates</p><p className="text-sm text-cyan-400 font-mono font-bold tracking-tight">{results.geo?.geo_data?.lat}, {results.geo?.geo_data?.lon}</p></div>
                       </div>
                     </div>
                     <div className="border border-slate-800 bg-slate-900/10 p-5 rounded shadow-lg">
                       <h3 className="text-[10px] text-green-500 font-bold uppercase mb-4 tracking-widest underline decoration-green-900/30">Registrar Records</h3>
                       <div className="space-y-3">
-                        <div>
-                          <p className="text-slate-400 font-semibold text-xs uppercase mb-1">Registered Owner</p>
-                          <p className="text-sm text-green-400 font-black uppercase tracking-tight font-mono">{results.whois?.registrar || 'DYNADOT LLC'}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-400 font-semibold text-xs uppercase mb-1">Ownership Expiration</p>
-                          <p className="text-sm text-green-400 font-mono font-bold">{results.whois?.expiration_date || '2029-01-18'}</p>
-                        </div>
+                        <div><p className="text-slate-400 font-semibold text-xs uppercase mb-1">Registered Owner</p><p className="text-sm text-green-400 font-black uppercase tracking-tight font-mono">{results.whois?.registrar || 'DYNADOT LLC'}</p></div>
+                        <div><p className="text-slate-400 font-semibold text-xs uppercase mb-1">Ownership Expiration</p><p className="text-sm text-green-400 font-mono font-bold">{results.whois?.expiration_date || '2029-01-18'}</p></div>
                       </div>
                     </div>
                   </div>
                 </div>
-              ) : <div className="flex flex-col items-center justify-center h-full text-slate-900 uppercase tracking-[1em] text-[11px] font-black italic opacity-20 animate-pulse">[ Uplink Active // Waiting For Mission ]</div>}
+              ) : <div className="flex flex-col items-center justify-center h-full text-slate-900 uppercase tracking-[1em] text-[11px] font-black italic opacity-20 animate-pulse">[ Uplink Active // Awaiting Mission ]</div>}
             </div>
           </div>
         </div>

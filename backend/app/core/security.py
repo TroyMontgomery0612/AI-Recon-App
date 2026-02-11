@@ -1,3 +1,4 @@
+import asyncio
 from functools import wraps
 
 from fastapi import HTTPException, Request
@@ -54,13 +55,17 @@ def require_scope(func):
         if not target:
             raise HTTPException(status_code=400, detail="Target parameter required")
 
-        if not scope_engine.is_ip_allowed(target):
-            # BLOCK THE REQUEST
+        # Run sync DB check in thread pool to avoid blocking the event loop
+        allowed = await asyncio.to_thread(scope_engine.is_ip_allowed, target)
+        if not allowed:
             raise HTTPException(
                 status_code=403,
                 detail=f"Target {target} is NOT authorized.",
             )
 
+        # Inject the validated target so the decorated function receives the actual
+        # string instead of relying on FastAPI's injection (which runs after the
+        # decorator and would otherwise leave target as the Query default).
         return await func(request, *args, **kwargs)
 
     return wrapper

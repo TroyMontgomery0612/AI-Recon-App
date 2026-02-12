@@ -29,3 +29,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 sudo service postgresql start
 uvicorn app.main:app --reload
+
+
+For UI or frontend do:  
+
+npm run dev

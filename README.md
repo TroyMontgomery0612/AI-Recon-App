@@ -33,4 +33,5 @@ uvicorn app.main:app --reload
 
 For UI or frontend do:  
 
+source venv/bin/activate
 npm run dev
